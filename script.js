@@ -11,30 +11,45 @@ const CONDITIONS = {
   },
   2: {
     label: "条件2",
-    summary: "香りを4ブロック連続",
-    steps: ["安静", "香り", "香り", "香り", "香り", "安静"],
+    summary: "香りAを4ブロック連続",
+    steps: ["安静", "香りA", "香りA", "香りA", "香りA", "安静"],
   },
   3: {
     label: "条件3",
-    summary: "香りのあと安静を3ブロック",
-    steps: ["安静", "香り", "安静", "安静", "安静", "安静"],
+    summary: "香りAのあと安静を3ブロック",
+    steps: ["安静", "香りA", "安静", "安静", "安静", "安静"],
   },
   4: {
     label: "条件4",
-    summary: "安静を挟んで香りを再提示",
-    steps: ["安静", "香り", "安静", "香り", "安静", "安静"],
+    summary: "安静を挟んで香りAを再提示",
+    steps: ["安静", "香りA", "安静", "香りA", "安静", "安静"],
+  },
+  5: {
+    label: "条件5",
+    summary: "香りBを4ブロック連続",
+    steps: ["安静", "香りB", "香りB", "香りB", "香りB", "安静"],
+  },
+  6: {
+    label: "条件6",
+    summary: "香りBのあと安静を3ブロック",
+    steps: ["安静", "香りB", "安静", "安静", "安静", "安静"],
+  },
+  7: {
+    label: "条件7",
+    summary: "安静を挟んで香りBを再提示",
+    steps: ["安静", "香りB", "安静", "香りB", "安静", "安静"],
   },
 };
 
 const PATTERNS = {
-  A: [3, 1, 4, 2],
-  B: [2, 4, 1, 3],
-  C: [4, 2, 3, 1],
-  D: [1, 3, 2, 4],
-  E: [3, 4, 2, 1],
-  F: [2, 1, 4, 3],
-  G: [4, 3, 1, 2],
-  H: [1, 4, 3, 2],
+  A: [3, 7, 1, 5, 2, 6, 4],
+  B: [6, 2, 4, 7, 1, 3, 5],
+  C: [1, 5, 7, 2, 6, 4, 3],
+  D: [4, 1, 6, 3, 7, 5, 2],
+  E: [7, 4, 2, 6, 3, 1, 5],
+  F: [2, 6, 5, 1, 4, 7, 3],
+  G: [5, 3, 6, 4, 1, 2, 7],
+  H: [6, 7, 3, 2, 5, 4, 1],
 };
 
 const STORAGE_KEYS = {
@@ -233,7 +248,7 @@ function normalizeRecord(record, index) {
       stageType: "intro",
       roundNumber: 0,
       label: "導入",
-      summary: "香り提示・主観評価・クレペリンテスト",
+      summary: "香りA・B提示・主観評価・クレペリンテスト",
       kraepelinStartTotalSeconds,
       kraepelinStartDisplay: formatTime(kraepelinStartTotalSeconds),
       cards,
@@ -429,9 +444,10 @@ function renderCurrentRound() {
   }
 
   if (stage.stageType === "intro") {
-    refs.roundTitle.textContent = "導入 / 香り提示・評価・クレペリン";
+    refs.roundTitle.textContent = "導入 / 香りA・B提示・評価・クレペリン";
     refs.stepChips.innerHTML = `
-      <span class="action-chip fragrance">香り提示</span>
+      <span class="action-chip fragrance">香りA提示</span>
+      <span class="action-chip fragrance">香りB提示</span>
       <span class="action-chip complete">VAS・眠気尺度・RT</span>
       <span class="action-chip complete">クレペリン 3分</span>
     `;
@@ -459,7 +475,7 @@ function renderSchedule() {
   refs.undoButton.disabled = state.records.length === 0;
   refs.finalBadge.textContent = patternSelected
     ? `導入 + ${PATTERNS[state.pattern].length}条件完了`
-    : "導入 + 4条件完了";
+    : "導入 + 7条件完了";
   refs.breathingTimeGroup.hidden = true;
 
   if (refs.activeRoundControls) {
@@ -487,7 +503,7 @@ function renderSchedule() {
       <div class="empty-state">
         ${
           stage?.stageType === "intro"
-            ? "香り提示、VAS、スタンフォード眠気尺度、視覚・聴覚RT後に、クレペリン開始時刻を入れてください。"
+            ? "香りA・香りB提示、VAS、スタンフォード眠気尺度、視覚・聴覚RT後に、クレペリン開始時刻を入れてください。"
             : "条件開始時刻を入れると、安静60秒・4ブロック・安静60秒の指示時刻を表示します。"
         }
       </div>
@@ -774,7 +790,7 @@ function saveCurrentRound() {
           stageType: "intro",
           roundNumber: 0,
           label: "導入",
-          summary: "香り提示・主観評価・クレペリンテスト",
+          summary: "香りA・B提示・主観評価・クレペリンテスト",
           kraepelinStartTotalSeconds: state.currentSchedule.kraepelinStartTotalSeconds,
           kraepelinStartDisplay: formatTime(state.currentSchedule.kraepelinStartTotalSeconds),
           cards: clone(state.currentSchedule.cards),
@@ -1020,7 +1036,7 @@ function buildMemoText(session) {
 
 function getRecordTitle(record) {
   if (record.stageType === "intro") {
-    return "導入 / 香り提示・評価・クレペリン";
+    return "導入 / 香りA・B提示・評価・クレペリン";
   }
   return `${record.roundNumber}回目 / 条件${record.conditionId}`;
 }
@@ -1206,7 +1222,7 @@ function getActionClassName(action) {
   if (action === "安静") {
     return "rest";
   }
-  if (action === "香り") {
+  if (action.startsWith("香り")) {
     return "fragrance";
   }
   return "complete";
