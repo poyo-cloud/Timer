@@ -234,25 +234,41 @@ function normalizeHistoryEntry(entry) {
 }
 
 function normalizeRecord(record, index) {
-  if (record.stageType === "intro" || Number.isFinite(record.kraepelinStartTotalSeconds)) {
+  if (
+    record.stageType === "kraepelin" ||
+    (record.stageType === "intro" && Number.isFinite(record.kraepelinStartTotalSeconds)) ||
+    (record.stageType !== "condition" && Number.isFinite(record.kraepelinStartTotalSeconds))
+  ) {
     const kraepelinStartTotalSeconds = Number.isFinite(record.kraepelinStartTotalSeconds)
       ? record.kraepelinStartTotalSeconds
       : 0;
-    const cards = normalizeCards(record.cards || record.schedule, "intro", null, {
+    const cards = normalizeCards(record.cards || record.schedule, "kraepelin", null, {
       kraepelinStartTotalSeconds,
     });
     const segments = Array.isArray(record.segments)
       ? record.segments.map(normalizeSegment)
-      : buildIntroSegments(kraepelinStartTotalSeconds);
+      : buildKraepelinSegments(kraepelinStartTotalSeconds);
     return {
-      stageType: "intro",
-      roundNumber: 0,
-      label: "導入",
-      summary: "香りA・B提示・主観評価・クレペリンテスト",
+      stageType: "kraepelin",
+      roundNumber: Number(record.roundNumber) || 0,
+      label: "クレペリン",
+      summary: "クレペリンテスト 3分",
       kraepelinStartTotalSeconds,
       kraepelinStartDisplay: formatTime(kraepelinStartTotalSeconds),
       cards,
       segments,
+      roundNote: record.roundNote || "",
+    };
+  }
+
+  if (record.stageType === "intro") {
+    return {
+      stageType: "intro",
+      roundNumber: 0,
+      label: "導入",
+      summary: "香りA・B提示・主観評価",
+      cards: [],
+      segments: [],
       roundNote: record.roundNote || "",
     };
   }
@@ -292,7 +308,10 @@ function normalizeCards(cards, stageType, conditionId, fallback = {}) {
     }));
   }
   if (stageType === "intro") {
-    return buildIntroCards(fallback.kraepelinStartTotalSeconds || 0);
+    return [];
+  }
+  if (stageType === "kraepelin") {
+    return buildKraepelinCards(fallback.kraepelinStartTotalSeconds || 0);
   }
   return buildConditionCards(conditionId, fallback.conditionStartTotalSeconds || 0);
 }
@@ -312,8 +331,11 @@ function normalizeCurrentSchedule(schedule) {
   if (!schedule || typeof schedule !== "object") {
     return null;
   }
-  if (schedule.stageType === "intro" || Number.isFinite(schedule.kraepelinStartTotalSeconds)) {
-    return buildIntroPlan(schedule.kraepelinStartTotalSeconds || 0);
+  if (schedule.stageType === "intro") {
+    return buildIntroPlan();
+  }
+  if (schedule.stageType === "kraepelin" || Number.isFinite(schedule.kraepelinStartTotalSeconds)) {
+    return buildKraepelinPlan(schedule.kraepelinStartTotalSeconds || 0);
   }
   const conditionId = Number(schedule.conditionId);
   if (Number.isFinite(conditionId)) {
@@ -403,7 +425,7 @@ function renderPatternSummary() {
   }
 
   const order = PATTERNS[state.pattern].map((id) => `条件${id}`).join(" → ");
-  refs.patternSummary.textContent = `選択中: パターン${state.pattern}（導入 → ${order}）`;
+  refs.patternSummary.textContent = `選択中: パターン${state.pattern}（導入 → ${order} → クレペリン）`;
   refs.orderStrip.innerHTML = buildStageOrderItems()
     .map((item, index) => {
       const classes = ["order-pill"];
@@ -430,10 +452,11 @@ function renderCurrentRound() {
   }
 
   if (isComplete()) {
-    refs.roundTitle.textContent = `導入 + ${PATTERNS[state.pattern].length}条件が完了しました`;
+    refs.roundTitle.textContent = `導入 + ${PATTERNS[state.pattern].length}条件 + クレペリンが完了しました`;
     refs.stepChips.innerHTML = `
-      <span class="action-chip complete">クレペリン 1回 完了</span>
+      <span class="action-chip complete">導入 完了</span>
       <span class="action-chip complete">${PATTERNS[state.pattern].length}条件 完了</span>
+      <span class="action-chip complete">クレペリン 1回 完了</span>
     `;
     return;
   }
@@ -444,11 +467,18 @@ function renderCurrentRound() {
   }
 
   if (stage.stageType === "intro") {
-    refs.roundTitle.textContent = "導入 / 香りA・B提示・評価・クレペリン";
+    refs.roundTitle.textContent = "導入 / 香りA・B提示・評価";
     refs.stepChips.innerHTML = `
       <span class="action-chip fragrance">香りA提示</span>
       <span class="action-chip fragrance">香りB提示</span>
       <span class="action-chip complete">VAS・眠気尺度・RT</span>
+    `;
+    return;
+  }
+
+  if (stage.stageType === "kraepelin") {
+    refs.roundTitle.textContent = "最終 / クレペリンテスト";
+    refs.stepChips.innerHTML = `
       <span class="action-chip complete">クレペリン 3分</span>
     `;
     return;
@@ -468,15 +498,21 @@ function renderSchedule() {
   const stage = getCurrentStageInfo();
   const patternSelected = hasSelectedPattern();
   const hasSchedule = Boolean(state.currentSchedule);
+  const needsSchedule = stage?.stageType !== "intro";
 
-  refs.saveRoundButton.disabled = !hasSchedule || !patternSelected;
+  refs.saveRoundButton.disabled = !patternSelected || (needsSchedule && !hasSchedule);
   refs.saveRoundButton.textContent =
-    stage?.stageType === "intro" ? "導入を記録して条件へ" : "この条件を記録して次へ";
+    stage?.stageType === "intro"
+      ? "導入を記録して条件へ"
+      : stage?.stageType === "kraepelin"
+        ? "クレペリンを記録して完了"
+        : "この条件を記録して次へ";
   refs.undoButton.disabled = state.records.length === 0;
   refs.finalBadge.textContent = patternSelected
-    ? `導入 + ${PATTERNS[state.pattern].length}条件完了`
-    : "導入 + 7条件完了";
+    ? `導入 + ${PATTERNS[state.pattern].length}条件 + クレペリン完了`
+    : "導入 + 7条件 + クレペリン完了";
   refs.breathingTimeGroup.hidden = true;
+  refs.scheduleForm.hidden = stage?.stageType === "intro";
 
   if (refs.activeRoundControls) {
     refs.activeRoundControls.hidden = isComplete() || !patternSelected;
@@ -484,32 +520,39 @@ function renderSchedule() {
 
   if (!patternSelected) {
     refs.primaryTimeLabel.textContent = "クレペリン開始時刻";
+    refs.scheduleForm.hidden = false;
     refs.scheduleCards.innerHTML = `<div class="empty-state">まず上でパターンを選んでください。</div>`;
     refs.helperText.textContent = "空欄は 0 として扱います。";
     return;
   }
 
   if (isComplete()) {
-    refs.scheduleCards.innerHTML = `<div class="empty-state">導入と${PATTERNS[state.pattern].length}条件が完了しました。CSVを書き出せます。</div>`;
+    refs.scheduleCards.innerHTML = `<div class="empty-state">導入、${PATTERNS[state.pattern].length}条件、クレペリンが完了しました。CSVを書き出せます。</div>`;
     refs.helperText.textContent = "必要なら完了メモに全体メモを追記できます。";
     return;
   }
 
+  if (stage?.stageType === "intro") {
+    refs.scheduleCards.innerHTML = `<div class="empty-state">香りA・香りB提示、VAS、スタンフォード眠気尺度、視覚・聴覚RTまで終わったら導入を記録してください。</div>`;
+    refs.helperText.textContent = "導入では時刻計算はありません。メモがあれば入力して、そのまま条件へ進めます。";
+    return;
+  }
+
   refs.primaryTimeLabel.textContent =
-    stage?.stageType === "intro" ? "クレペリン開始時刻" : "条件開始時刻（最初の安静開始）";
+    stage?.stageType === "kraepelin" ? "クレペリン開始時刻" : "条件開始時刻（最初の安静開始）";
 
   if (!hasSchedule) {
     refs.scheduleCards.innerHTML = `
       <div class="empty-state">
         ${
-          stage?.stageType === "intro"
-            ? "香りA・香りB提示、VAS、スタンフォード眠気尺度、視覚・聴覚RT後に、クレペリン開始時刻を入れてください。"
+          stage?.stageType === "kraepelin"
+            ? "7条件すべての評価・RT後に、クレペリン開始時刻を入れてください。"
             : "条件開始時刻を入れると、安静60秒・4ブロック・安静60秒の指示時刻を表示します。"
         }
       </div>
     `;
     refs.helperText.textContent =
-      stage?.stageType === "intro"
+      stage?.stageType === "kraepelin"
         ? "クレペリン開始時刻を入力してください。"
         : "条件開始時刻を入力してください。";
     return;
@@ -530,8 +573,8 @@ function renderSchedule() {
     .join("");
 
   refs.helperText.textContent =
-    state.currentSchedule.stageType === "intro"
-      ? `クレペリンテストを ${formatTimeShort(state.currentSchedule.kraepelinStartTotalSeconds)} から3分間行います。導入の主観評価とRTはメモ欄で補足できます。`
+    state.currentSchedule.stageType === "kraepelin"
+      ? `クレペリンテストを ${formatTimeShort(state.currentSchedule.kraepelinStartTotalSeconds)} から3分間行います。`
       : `${CONDITIONS[state.currentSchedule.conditionId].label} は ${formatTimeShort(state.currentSchedule.conditionStartTotalSeconds)} から4分間です。`;
 }
 
@@ -629,6 +672,15 @@ function createSchedule() {
   }
 
   const stage = getCurrentStageInfo();
+  if (stage?.stageType === "intro") {
+    state.currentSchedule = buildIntroPlan();
+    state.historySaved = false;
+    state.historySyncSuppressed = false;
+    persistDraft();
+    render();
+    return;
+  }
+
   const primaryResult = parseTimeInput(
     refs.primaryMinutesInput.value.trim(),
     refs.primarySecondsInput.value.trim(),
@@ -647,8 +699,8 @@ function createSchedule() {
   state.currentBreathingMinutes = "";
   state.currentBreathingSeconds = "";
   state.currentSchedule =
-    stage.stageType === "intro"
-      ? buildIntroPlan(primaryResult.totalSeconds)
+    stage.stageType === "kraepelin"
+      ? buildKraepelinPlan(primaryResult.totalSeconds)
       : buildConditionPlan(stage.conditionId, primaryResult.totalSeconds);
   state.historySaved = false;
   state.historySyncSuppressed = false;
@@ -656,12 +708,20 @@ function createSchedule() {
   render();
 }
 
-function buildIntroPlan(kraepelinStartTotalSeconds) {
+function buildIntroPlan() {
   return {
     stageType: "intro",
+    cards: [],
+    segments: [],
+  };
+}
+
+function buildKraepelinPlan(kraepelinStartTotalSeconds) {
+  return {
+    stageType: "kraepelin",
     kraepelinStartTotalSeconds,
-    cards: buildIntroCards(kraepelinStartTotalSeconds),
-    segments: buildIntroSegments(kraepelinStartTotalSeconds),
+    cards: buildKraepelinCards(kraepelinStartTotalSeconds),
+    segments: buildKraepelinSegments(kraepelinStartTotalSeconds),
   };
 }
 
@@ -676,7 +736,7 @@ function buildConditionPlan(conditionId, conditionStartTotalSeconds) {
   };
 }
 
-function buildIntroCards(kraepelinStartTotalSeconds) {
+function buildKraepelinCards(kraepelinStartTotalSeconds) {
   return [
     {
       stepLabel: "Start",
@@ -694,7 +754,7 @@ function buildIntroCards(kraepelinStartTotalSeconds) {
   ];
 }
 
-function buildIntroSegments(kraepelinStartTotalSeconds) {
+function buildKraepelinSegments(kraepelinStartTotalSeconds) {
   return [
     {
       segmentKind: "kraepelin",
@@ -778,37 +838,53 @@ function buildSegment(segmentKind, segmentLabel, action, startSeconds, durationS
 }
 
 function saveCurrentRound() {
-  if (!state.currentSchedule || isComplete()) {
+  if (!hasSelectedPattern() || isComplete()) {
     return;
   }
 
   const stage = getCurrentStageInfo();
+  if (stage?.stageType !== "intro" && !state.currentSchedule) {
+    return;
+  }
+
   const roundNote = state.currentRoundNote.trim();
-  const record =
-    state.currentSchedule.stageType === "intro"
-      ? {
-          stageType: "intro",
-          roundNumber: 0,
-          label: "導入",
-          summary: "香りA・B提示・主観評価・クレペリンテスト",
-          kraepelinStartTotalSeconds: state.currentSchedule.kraepelinStartTotalSeconds,
-          kraepelinStartDisplay: formatTime(state.currentSchedule.kraepelinStartTotalSeconds),
-          cards: clone(state.currentSchedule.cards),
-          segments: clone(state.currentSchedule.segments),
-          roundNote,
-        }
-      : {
-          stageType: "condition",
-          roundNumber: stage.roundNumber,
-          conditionId: state.currentSchedule.conditionId,
-          summary: CONDITIONS[state.currentSchedule.conditionId].summary,
-          conditionStartTotalSeconds: state.currentSchedule.conditionStartTotalSeconds,
-          conditionStartDisplay: formatTime(state.currentSchedule.conditionStartTotalSeconds),
-          conditionEndTotalSeconds: state.currentSchedule.conditionEndTotalSeconds,
-          cards: clone(state.currentSchedule.cards),
-          segments: clone(state.currentSchedule.segments),
-          roundNote,
-        };
+  let record;
+  if (stage.stageType === "intro") {
+    record = {
+      stageType: "intro",
+      roundNumber: 0,
+      label: "導入",
+      summary: "香りA・B提示・主観評価",
+      cards: [],
+      segments: [],
+      roundNote,
+    };
+  } else if (stage.stageType === "kraepelin") {
+    record = {
+      stageType: "kraepelin",
+      roundNumber: stage.roundNumber,
+      label: "クレペリン",
+      summary: "クレペリンテスト 3分",
+      kraepelinStartTotalSeconds: state.currentSchedule.kraepelinStartTotalSeconds,
+      kraepelinStartDisplay: formatTime(state.currentSchedule.kraepelinStartTotalSeconds),
+      cards: clone(state.currentSchedule.cards),
+      segments: clone(state.currentSchedule.segments),
+      roundNote,
+    };
+  } else {
+    record = {
+      stageType: "condition",
+      roundNumber: stage.roundNumber,
+      conditionId: state.currentSchedule.conditionId,
+      summary: CONDITIONS[state.currentSchedule.conditionId].summary,
+      conditionStartTotalSeconds: state.currentSchedule.conditionStartTotalSeconds,
+      conditionStartDisplay: formatTime(state.currentSchedule.conditionStartTotalSeconds),
+      conditionEndTotalSeconds: state.currentSchedule.conditionEndTotalSeconds,
+      cards: clone(state.currentSchedule.cards),
+      segments: clone(state.currentSchedule.segments),
+      roundNote,
+    };
+  }
 
   state.records = [...state.records, record];
   state.currentIndex = state.records.length;
@@ -843,9 +919,13 @@ function undoLastRound() {
   state.historySyncSuppressed = false;
 
   if (previous.stageType === "intro") {
+    state.currentPrimaryMinutes = "";
+    state.currentPrimarySeconds = "";
+    state.currentSchedule = null;
+  } else if (previous.stageType === "kraepelin") {
     state.currentPrimaryMinutes = Math.floor(previous.kraepelinStartTotalSeconds / 60).toString();
     state.currentPrimarySeconds = String(previous.kraepelinStartTotalSeconds % 60).padStart(2, "0");
-    state.currentSchedule = buildIntroPlan(previous.kraepelinStartTotalSeconds);
+    state.currentSchedule = buildKraepelinPlan(previous.kraepelinStartTotalSeconds);
   } else {
     state.currentPrimaryMinutes = Math.floor(previous.conditionStartTotalSeconds / 60).toString();
     state.currentPrimarySeconds = String(previous.conditionStartTotalSeconds % 60).padStart(2, "0");
@@ -918,7 +998,7 @@ function shouldConfirmPatternChange() {
 }
 
 function getTotalStageCount() {
-  return hasSelectedPattern() ? 1 + PATTERNS[state.pattern].length : 5;
+  return hasSelectedPattern() ? 2 + PATTERNS[state.pattern].length : 9;
 }
 
 function buildStageOrderItems() {
@@ -928,6 +1008,7 @@ function buildStageOrderItems() {
   return [
     "導入",
     ...PATTERNS[state.pattern].map((conditionId, index) => `${index + 1}回目 条件${conditionId}`),
+    "クレペリン",
   ];
 }
 
@@ -939,6 +1020,9 @@ function getCurrentStageInfo() {
     return { stageType: "intro" };
   }
   const conditionIndex = state.currentIndex - 1;
+  if (conditionIndex >= PATTERNS[state.pattern].length) {
+    return { stageType: "kraepelin", roundNumber: state.currentIndex };
+  }
   const conditionId = PATTERNS[state.pattern][conditionIndex];
   return conditionId
     ? { stageType: "condition", roundNumber: state.currentIndex, conditionId }
@@ -1015,9 +1099,13 @@ function buildMemoText(session) {
 
   session.records.forEach((record) => {
     lines.push(getRecordTitle(record));
-    lines.push(record.stageType === "intro"
-      ? `クレペリン開始: ${record.kraepelinStartDisplay}`
-      : `条件開始: ${record.conditionStartDisplay}`);
+    if (record.stageType === "intro") {
+      lines.push("香りA・B提示、主観評価、RT完了");
+    } else if (record.stageType === "kraepelin") {
+      lines.push(`クレペリン開始: ${record.kraepelinStartDisplay}`);
+    } else {
+      lines.push(`条件開始: ${record.conditionStartDisplay}`);
+    }
     record.cards.forEach((item) => {
       lines.push(`${formatTime(item.timeSeconds)} ${item.action}`);
     });
@@ -1036,20 +1124,26 @@ function buildMemoText(session) {
 
 function getRecordTitle(record) {
   if (record.stageType === "intro") {
-    return "導入 / 香りA・B提示・評価・クレペリン";
+    return "導入 / 香りA・B提示・評価";
+  }
+  if (record.stageType === "kraepelin") {
+    return "最終 / クレペリンテスト";
   }
   return `${record.roundNumber}回目 / 条件${record.conditionId}`;
 }
 
 function getRecordSubtitle(record) {
   if (record.stageType === "intro") {
-    return `クレペリン開始: ${formatTimeShort(record.kraepelinStartTotalSeconds)}`;
+    return "香りA・B提示、主観評価、RT";
+  }
+  if (record.stageType === "kraepelin") {
+    return `クレペリン開始: ${formatTimeShort(record.kraepelinStartTotalSeconds)} / 終了: ${formatTimeShort(record.kraepelinStartTotalSeconds + KRAEPELIN_DURATION)}`;
   }
   return `条件開始: ${formatTimeShort(record.conditionStartTotalSeconds)} / 終了: ${formatTimeShort(record.conditionEndTotalSeconds)}`;
 }
 
 function getRecordBadge(record) {
-  return record.stageType === "intro" ? "クレペリン 3分" : record.summary || "";
+  return record.summary || "";
 }
 
 function exportCsv() {
@@ -1094,7 +1188,7 @@ function buildExportRows(session) {
       window_end_display: formatTimeShort(segment.windowEndSeconds),
       duration_seconds: segment.durationSeconds,
       kraepelin_start_real_seconds:
-        record.stageType === "intro" ? record.kraepelinStartTotalSeconds : "",
+        record.stageType === "kraepelin" ? record.kraepelinStartTotalSeconds : "",
       condition_start_real_seconds:
         record.stageType === "condition" ? record.conditionStartTotalSeconds : "",
       condition_end_real_seconds:
